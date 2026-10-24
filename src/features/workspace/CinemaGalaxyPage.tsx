@@ -1,0 +1,26 @@
+import { useMemo } from 'react';
+import { Link } from 'react-router-dom';
+import { ArrowUpRight, Orbit, Sparkles } from 'lucide-react';
+import { useAppStore } from '../../store';
+import { readWorkspace } from '../../lib/workspace';
+import { tmdbImage } from '../../lib/tmdb';
+
+/** A personal, locally-generated constellation of films from the diary and watchlist. */
+export default function CinemaGalaxyPage() {
+  const watchlist = useAppStore(s => s.watchlist);
+  const diary = useMemo(() => readWorkspace().diary.filter(entry => !entry.deletedAt), []);
+  const films = useMemo(() => {
+    const byId = new Map<number, { id: number; title: string; poster: string | null; watched: boolean; rating?: number; date?: string; genres: number[] }>();
+    diary.forEach(entry => byId.set(entry.tmdbId, { id: entry.tmdbId, title: entry.title, poster: entry.posterPath, watched: true, rating: entry.stars, date: entry.watchedAt, genres: [] }));
+    watchlist.forEach(movie => { const existing=byId.get(movie.id); if(existing){existing.genres=movie.genre_ids||[];if(!existing.poster)existing.poster=movie.poster_path ?? null;} else byId.set(movie.id, { id: movie.id, title: movie.title ?? 'Untitled film', poster: movie.poster_path ?? null, watched: false, rating: movie.vote_average, genres: movie.genre_ids||[] }); });
+    return [...byId.values()];
+  }, [diary, watchlist]);
+  const genreNames:Record<number,string>={28:'Action',12:'Adventure',16:'Animation',35:'Comedy',80:'Crime',99:'Documentary',18:'Drama',14:'Fantasy',27:'Horror',9648:'Mystery',10749:'Romance',878:'Sci-fi',53:'Thriller',10751:'Family',36:'History',10402:'Music',10752:'War',37:'Western'};
+  const trails = useMemo(()=>{const pairs:{a:(typeof films)[number];b:(typeof films)[number];shared:number[]}[]=[];for(let i=0;i<films.length;i++)for(let j=i+1;j<films.length;j++){const shared=films[i].genres.filter(g=>films[j].genres.includes(g));if(shared.length)pairs.push({a:films[i],b:films[j],shared});}return pairs.sort((x,y)=>y.shared.length-x.shared.length).slice(0,8)},[films]);
+  return <div className="page galaxy-page"><div className="topline"><span className="eyebrow"><span className="live-dot"/> YOUR PERSONAL FILM UNIVERSE</span><span className="galaxy-count">{films.length} STARS IN YOUR ORBIT</span></div>
+    <section className="galaxy-hero"><div className="galaxy-nebula"/><span className="eyebrow"><Orbit size={14}/> THE CINEMA GALAXY</span><h1>Every film leaves<br/><em>a constellation.</em></h1><p>Your watched films and saved discoveries become a little universe of their own. Add a diary entry or save a film to grow your sky.</p><div className="galaxy-legend"><span><i className="watched-dot"/> Watched & logged</span><span><i className="saved-dot"/> Saved to watch</span></div></section>
+    {films.length ? <section className="galaxy-field" aria-label="Your film constellation">{films.map((film, index) => { const angle = index * 2.39996; const radius = 8 + Math.sqrt(index + 1) * 10; const x = 50 + Math.cos(angle) * Math.min(38, radius); const y = 50 + Math.sin(angle) * Math.min(35, radius); return <Link key={film.id} to={film.watched ? `/movie/${film.id}` : `/movie/${film.id}`} className={`galaxy-star ${film.watched ? 'is-watched' : 'is-saved'}`} style={{left:`${x}%`,top:`${y}%`,animationDelay:`${(index%9)*.13}s`}} title={`${film.title}${film.watched ? ' · Watched' : ' · Saved'}`}><span className="star-core">{film.poster && <img src={tmdbImage(film.poster,'w185')} alt="" loading="lazy"/>}</span><span className="star-label">{film.title}</span>{film.watched && film.rating ? <span className="star-rating">★ {film.rating}/5</span> : null}</Link>; })}<div className="galaxy-center"><Sparkles size={19}/><strong>CINE<br/>TRIBE</strong><small>YOUR UNIVERSE</small></div></section> : <section className="galaxy-empty"><div className="empty-orbit"><Orbit size={42}/></div><h2>Your universe is waiting.</h2><p>Save films you want to see, or log a film in your diary. They’ll appear here as stars.</p><Link className="primary-button" to="/">Discover your first film <ArrowUpRight size={16}/></Link></section>}
+    {trails.length>0&&<section className="galaxy-trails"><div className="section-heading"><div><span className="eyebrow">FOLLOW THE THREAD</span><h2>Film relationship trails</h2></div><span className="result-count">METADATA-BASED LINKS</span></div><p className="muted-copy">These connections use shared TMDB genre metadata from saved films. They are discovery hints, not claims that two films are identical.</p><div className="galaxy-trail-list">{trails.map((trail,index)=><article key={`${trail.a.id}-${trail.b.id}`}><span className="trail-index">{String(index+1).padStart(2,'0')}</span><Link to={`/movie/${trail.a.id}`}>{trail.a.title}</Link><span className="trail-connector" aria-hidden="true">⟷</span><Link to={`/movie/${trail.b.id}`}>{trail.b.title}</Link><small>Connected by {trail.shared.map(id=>genreNames[id]||'shared genre').join(' + ')}</small></article>)}</div></section>}
+    <section className="galaxy-footnote"><span>01 / A PERSONAL ARCHIVE</span><p>This constellation is built from your browser’s Cinéon diary and watchlist. Film relationship trails are shown only where shared genre metadata is available; deeper director/actor connections require the relevant TMDB credits.</p></section>
+  </div>;
+}

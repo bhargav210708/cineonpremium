@@ -1,0 +1,22 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() { return request.auth != null; }
+    match /users/{uid}/{allPaths=**} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if signedIn() && request.auth.uid == uid
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+    }
+    // Public media is attached to public community posts. Uploaders can only write
+    // into their own UID prefix; type and size limits prevent arbitrary file hosting.
+    match /community-media/{uid}/{allPaths=**} {
+      allow read: if true;
+      allow write: if signedIn() && request.auth.uid == uid
+        && request.resource.size < 50 * 1024 * 1024
+        && (request.resource.contentType.matches('image/(jpeg|png|webp)')
+          || request.resource.contentType.matches('video/(mp4|webm|quicktime)'));
+    }
+    match /{allPaths=**} { allow read, write: if false; }
+  }
+}

@@ -1,0 +1,89 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function owns(uid) { return signedIn() && request.auth.uid == uid; }
+    function validText(value, max) { return value is string && value.size() <= max; }
+
+    match /users/{uid} {
+      allow read: if owns(uid);
+      allow create: if owns(uid)
+        && request.resource.data.keys().hasOnly(['handle','displayName','photoURL','bio','city','favFormats','counts','settings','createdAt'])
+        && validText(request.resource.data.handle, 24)
+        && validText(request.resource.data.displayName, 80)
+        && validText(request.resource.data.bio, 240);
+      allow update: if owns(uid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['handle','displayName','photoURL','bio','city','favFormats','settings']);
+      allow delete: if false; // Use the authenticated account-deletion function for cascade deletion.
+      match /watchlist/{movieId} {
+        allow read, delete: if owns(uid);
+        allow create, update: if owns(uid)
+          && request.resource.data.keys().hasOnly(['status','movie','addedAt'])
+          && request.resource.data.status in ['going','watched'];
+      }
+      match /workspace/{docId} { allow read, write: if owns(uid) && docId == 'state'; }
+    }
+
+    match /publicProfiles/{uid} {
+      allow read: if resource.data.visibility == 'public' || owns(uid);
+      allow create, update: if owns(uid)
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.visibility in ['public','followers','private']
+        && validText(request.resource.data.handle, 24)
+        && validText(request.resource.data.displayName, 80)
+        && validText(request.resource.data.bio, 240);
+      allow delete: if owns(uid);
+    }
+
+    match /entries/{entryId} {
+      allow read: if (resource.data.visibility == 'public')
+        || (signedIn() && resource.data.uid == request.auth.uid)
+        || (signedIn() && resource.data.visibility == 'followers' && resource.data.uid == request.auth.uid);
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid','tmdbId','movie','watchedAt','cinemaId','screen','format','seat','stars','review','spoiler','subRatings','tags','price','photoUrl','cardUrl','visibility','counts','createdAt','deletedAt'])
+        && request.resource.data.stars is number && request.resource.data.stars >= 0.5 && request.resource.data.stars <= 5
+        && validText(request.resource.data.review, 2000)
+        && request.resource.data.visibility in ['public','followers','private'];
+      allow update: if signedIn() && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == resource.data.uid
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['counts']);
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+      match /likes/{uid} { allow read: if true; allow create, delete: if owns(uid); allow update: if false; }
+      match /comments/{commentId} {
+        allow read: if get(/databases/$(database)/documents/entries/$(entryId)).data.visibility == 'public' || (signedIn() && get(/databases/$(database)/documents/entries/$(entryId)).data.uid == request.auth.uid);
+        allow create: if signedIn() && request.resource.data.uid == request.auth.uid && validText(request.resource.data.text, 1000);
+        allow update, delete: if signedIn() && resource.data.uid == request.auth.uid;
+      }
+    }
+
+    match /posts/{postId} {
+      allow read: if resource.data.visibility == 'public' || (signedIn() && resource.data.uid == request.auth.uid);
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid && validText(request.resource.data.text, 2000);
+      allow update: if signedIn() && resource.data.uid == request.auth.uid
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['likesCount','commentCount']);
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+      match /comments/{commentId} { allow read: if true; allow create: if signedIn() && request.resource.data.uid == request.auth.uid && validText(request.resource.data.text, 1000); allow update, delete: if signedIn() && resource.data.uid == request.auth.uid; }
+      match /likes/{uid} { allow read: if true; allow create, delete: if owns(uid); allow update: if false; }
+    }
+
+    match /follows/{followId} { allow read: if signedIn(); allow create: if signedIn() && request.resource.data.followerUid == request.auth.uid; allow delete: if signedIn() && resource.data.followerUid == request.auth.uid; allow update: if false; }
+    match /cinemas/{cinemaId} { allow read: if true; allow write: if false; }
+    match /cinemaReports/{reportId} {
+      allow read: if true;
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid
+        && request.resource.data.picture is number && request.resource.data.picture >= 1 && request.resource.data.picture <= 5
+        && request.resource.data.sound is number && request.resource.data.sound >= 1 && request.resource.data.sound <= 5
+        && request.resource.data.seats is number && request.resource.data.seats >= 1 && request.resource.data.seats <= 5
+        && request.resource.data.crowd is number && request.resource.data.crowd >= 1 && request.resource.data.crowd <= 5;
+      allow update, delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+    match /tribes/{tribeId} { allow read: if resource.data.visibility == 'public' || (signedIn() && request.auth.uid in resource.data.members); allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid; allow update, delete: if signedIn() && resource.data.ownerUid == request.auth.uid; match /members/{uid} { allow read: if true; allow create, delete: if owns(uid); allow update: if false; } match /posts/{postId} { allow read: if true; allow create: if signedIn() && request.resource.data.uid == request.auth.uid && validText(request.resource.data.text, 2000); allow update, delete: if signedIn() && resource.data.uid == request.auth.uid; } }
+    match /parties/{partyId} { allow read: if resource.data.visibility == 'public' || (signedIn() && (resource.data.hostUid == request.auth.uid || request.auth.uid in resource.data.members)); allow create: if signedIn() && request.resource.data.hostUid == request.auth.uid; allow update: if signedIn() && (resource.data.hostUid == request.auth.uid || request.auth.uid in resource.data.members); allow delete: if signedIn() && resource.data.hostUid == request.auth.uid; }
+    match /lists/{listId} { allow read: if resource.data.visibility == 'public' || (signedIn() && (resource.data.owner == request.auth.uid || request.auth.uid in resource.data.collaborators)); allow create: if signedIn() && request.resource.data.owner == request.auth.uid; allow update: if signedIn() && (resource.data.owner == request.auth.uid || request.auth.uid in resource.data.collaborators); allow delete: if signedIn() && resource.data.owner == request.auth.uid; }
+    match /reports/{reportId} { allow create: if signedIn() && request.resource.data.uid == request.auth.uid; allow read, update, delete: if false; }
+    match /notifications/{uid}/items/{itemId} { allow read, update: if owns(uid); allow create, delete: if false; }
+    match /badges/{uid} { allow read: if owns(uid); allow write: if false; }
+    match /aiRateLimits/{uid} { allow read, write: if false; }
+    match /{document=**} { allow read, write: if false; }
+  }
+}
